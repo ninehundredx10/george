@@ -128,7 +128,7 @@ def poll(store):
             candidates = s['candidates']
             candidates = {k: v for k, v in candidates.items() if v['expires'] > time.time()}
             s['candidates'] = candidates
-            if cid not in candidates and len(candidates) < 20:
+            if cid in candidates or len(candidates) < 20:
                 code = secrets.token_hex(8)
                 candidates[cid] = {'digest': hashlib.sha256(code.encode()).hexdigest(),
                                    'expires': time.time() + 86400}

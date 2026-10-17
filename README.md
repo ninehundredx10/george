@@ -10,7 +10,8 @@ Run **Actions → George → Run workflow**, with `initialize` checked **only fo
 Send `/start` to [@GeorgeVagabond_bot](https://t.me/GeorgeVagabond_bot). The next check sends a
 random one-time pairing code to private chats that requested pairing. Enter **your** code
 in the workflow's `pairing_code` field and run again. Repository write access authenticates
-the pairing approval; a stranger's `/start` cannot claim George. Codes expire after 24 hours.
+the pairing approval; a stranger's `/start` cannot claim George. Codes expire after 24 hours;
+sending `/start` again replaces your previous code on the next check.
 Do not share a code except with your trusted setup conversation or workflow.
 
 Pairing triggers the first awakening. Manual `force_wake` can wake him later.
