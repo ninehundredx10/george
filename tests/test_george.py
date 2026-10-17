@@ -22,6 +22,33 @@ class GeorgeTests(unittest.TestCase):
         self.assertFalse(g.reserve(s))
         self.assertEqual(s.data['ledger'][g.month()], 500)
 
+    def test_failed_send_retains_durable_outbox(self):
+        s = Memory()
+        s.data['outbox'] = ['hello']
+        s.save()
+        with patch.object(g, 'send', side_effect=TimeoutError):
+            with self.assertRaises(TimeoutError):
+                g.drain_outbox(s)
+        self.assertEqual(s.data['outbox'], ['hello'])
+        with patch.object(g, 'send'):
+            g.drain_outbox(s)
+        self.assertEqual(s.saved[-1]['outbox'], [])
+
+    def test_state_encrypted_authenticated_round_trip(self):
+        with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 'test-high-entropy-token',
+                'GITHUB_REPOSITORY': 'example/george', 'GH_STATE_TOKEN': 'fake'}):
+            from urllib.error import HTTPError
+            with patch.dict(os.environ, {'ALLOW_INITIALIZE': 'true'}), patch.object(g, 'api',
+                    side_effect=HTTPError('https://example.com', 404, 'missing', {}, None)):
+                store = g.Store()
+            plain = b'{"private":"message"}'
+            encrypted = store.cipher.encrypt(plain)
+            self.assertNotIn(b'message', encrypted)
+            self.assertEqual(store.cipher.decrypt(encrypted), plain)
+            from cryptography.fernet import InvalidToken
+            with self.assertRaises(InvalidToken):
+                store.cipher.decrypt(encrypted[:-3] + b'xxx')
+
     def test_checkpoint_failure_prevents_paid_call(self):
         s = Memory()
         with patch.object(s, 'save', side_effect=RuntimeError), patch.object(g, 'api') as api:
