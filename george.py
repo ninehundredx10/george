@@ -256,7 +256,7 @@ def think(store, context):
     if not reserve(store):
         return None
     result = api('https://api.openai.com/v1/responses', {
-        'model': MODEL, 'instructions': SYSTEM, 'input': serialized, 'store': False,
+        'model': MODEL, 'instructions': SYSTEM, 'input': 'Return JSON. Context data follows:\n' + serialized, 'store': False,
         'max_output_tokens': 3000, 'reasoning': {'effort': 'none'},
         'text': {'format': {'type': 'json_object'}}},
         {'Authorization': 'Bearer ' + os.environ['OPENAI_API_KEY']})
