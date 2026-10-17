@@ -17,6 +17,10 @@ Do not share a code except with your trusted setup conversation or workflow.
 Pairing triggers the first awakening. Manual `force_wake` can wake him later.
 `/pause`, `/resume`, `/status` work without OpenAI calls. Other messages become conversation.
 Telegram is polled hourly, so replies can take an hour or longer if GitHub delays a run.
+Each accepted conversation batch gets a deterministic receipt at polling time without an AI
+call, even when the budget is exhausted. `/status` includes the last completed awakening and
+next chosen wake. Receipts cannot arrive if GitHub never starts the check; inspect Actions if
+no receipt arrives. The configured hourly check is at minute 11 (best effort).
 Only paired private-chat messages reach the model. Text only in this version.
 
 ## Memory and boundaries

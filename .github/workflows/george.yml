@@ -1,7 +1,7 @@
 name: George
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '11 * * * *'
   push:
     branches: [main]
     paths: ['george.py', 'requirements.txt', '.github/workflows/george.yml']

@@ -96,6 +96,15 @@ class GeorgeTests(unittest.TestCase):
         self.assertFalse(s.data['paused'])
         self.assertEqual(s.data['inbox'], ['hello'])
 
+    def test_human_message_gets_receipt_without_model_call(self):
+        s = Memory()
+        update = {'update_id': 1, 'message': {'chat': {'id': 123, 'type': 'private'}, 'text': 'Are you there?'}}
+        with patch.object(g, 'telegram', return_value=[update]), patch.object(g, 'think') as think:
+            g.poll(s)
+        think.assert_not_called()
+        self.assertIn('Are you there?', s.saved[-1]['inbox'])
+        self.assertIn('Message received', s.saved[-1]['outbox'][0])
+
     def test_pairing_requires_code_from_authorized_dispatch(self):
         s = Memory()
         s.data.pop('owner')

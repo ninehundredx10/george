@@ -106,6 +106,7 @@ def telegram(method, body):
 
 def send(chat, text):
     telegram('sendMessage', {'chat_id': chat, 'text': text[:3900], 'link_preview_options': {'is_disabled': True}})
+    print('Telegram private message delivered.')
 
 
 def drain_outbox(store):
@@ -118,6 +119,7 @@ def drain_outbox(store):
 
 def poll(store):
     s = store.data
+    received = 0
     updates = telegram('getUpdates', {'offset': s['offset'], 'timeout': 0, 'limit': 100,
                                        'allowed_updates': ['message']})
     for update in updates:
@@ -136,9 +138,12 @@ def poll(store):
                 s['next_wake'] = 0
             elif text == '/status':
                 send(cid, 'I am ' + ('paused.' if s['paused'] else 'running.') +
-                     ' Monthly reserved spend: $%.2f of $5.00.' % (s['ledger'].get(month(), 0) / 100))
+                     ' Monthly reserved spend: $%.2f of $5.00.' % (s['ledger'].get(month(), 0) / 100) +
+                     '\nLast completed awakening: ' + s.get('last_awake_utc', 'not recorded') +
+                     '\nNext chosen wake (UTC): ' + time.strftime('%Y-%m-%d %H:%M', time.gmtime(s['next_wake'])))
             elif text:
                 s['inbox'] = (s['inbox'] + [text])[-20:]
+                received += 1
         elif not s.get('owner') and text.startswith('/start'):
             # A repository-authorized dispatch must confirm this code. First contact never wins.
             candidates = s['candidates']
@@ -151,7 +156,13 @@ def poll(store):
                 store.save()
                 send(cid, 'George is ready to pair. Give this one-time code to your Codex chat, '
                      'or enter it in the George workflow pairing_code field: ' + code)
+    s['last_poll_utc'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    if received:
+        s.setdefault('outbox', []).append('Message received by my Telegram check. ' +
+            ('I am paused; it is saved for when you /resume.' if s['paused'] else
+             'It is saved, and I will consider it during this awakening. This receipt uses no AI call.'))
     store.save()
+    print('Telegram poll completed; accepted human messages: ' + str(received))
 
 
 def pair(store, code):
@@ -319,6 +330,8 @@ def awaken(store, force=False):
             web = read_web(obj.get('url', ''))
         except Exception:
             web = 'Read failed or blocked by public HTTPS policy.'
+    s['last_awake_utc'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    store.save()
     print('Awakening completed; private details are encrypted.')
 
 
