@@ -43,8 +43,24 @@ def api(url, data=None, headers=None):
     request = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(),
         headers={'Content-Type': 'application/json', **(headers or {})})
     # Intentionally no retries: uncertain paid requests remain charged to the ledger.
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.load(response)
+    from urllib.error import HTTPError
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.load(response)
+    except HTTPError as exc:
+        host = urllib.parse.urlsplit(url).hostname
+        if host in ('api.openai.com', 'api.telegram.org'):
+            print('Service error: ' + host + ' HTTP ' + str(exc.code))
+            if host == 'api.openai.com':
+                try:
+                    error = json.loads(exc.read(12000)).get('error', {})
+                    for field in ('code', 'type', 'param'):
+                        value = error.get(field)
+                        if isinstance(value, str) and re.fullmatch(r'[a-zA-Z0-9_.-]{1,80}', value):
+                            print('OpenAI error ' + field + ': ' + value)
+                except Exception:
+                    pass
+        raise
 
 
 class Store:
