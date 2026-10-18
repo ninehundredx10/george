@@ -53,7 +53,7 @@ He can choose a search-engine URL and follow links; sites may refuse automated a
 The runtime refuses paid calls after **$5 in conservative reservations per UTC calendar month**,
 independent of the OpenAI project's $10 alert budget. Each request durably reserves **$0.05**
 BEFORE contacting OpenAI, with no refunds, including failed/uncertain calls and no automatic
-paid retries. At most 3 model calls per awakening. Single workflow concurrency and GitHub's
+paid retries. At most 7 model calls per awakening. Single workflow concurrency and GitHub's
 SHA compare-and-swap prevent simultaneous writers from spending against the same balance.
 The cap is not writable by model output or Telegram commands. George requests approval via
 Telegram on exhaustion; an owner must review and edit the constant to raise it. Otherwise
