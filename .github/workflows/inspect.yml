@@ -1,6 +1,15 @@
 name: Inspect George (read only)
 on:
   workflow_dispatch:
+    inputs:
+      since:
+        description: 'Inspection window start (UTC ISO timestamp)'
+        default: '2026-10-17T12:46:40Z'
+        type: string
+      until:
+        description: 'Inspection window end (UTC ISO timestamp)'
+        default: '2026-10-17T12:47:30Z'
+        type: string
 permissions:
   contents: read
 jobs:
@@ -20,3 +29,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GH_STATE_TOKEN: ${{ github.token }}
+          INSPECT_SINCE: ${{ inputs.since }}
+          INSPECT_UNTIL: ${{ inputs.until }}
