@@ -2,6 +2,9 @@ name: Inspect George (read only)
 on:
   workflow_dispatch:
     inputs:
+      report_public_key:
+        description: 'Optional public encryption key for a private notes report'
+        type: string
       since:
         description: 'Inspection window start (UTC ISO timestamp)'
         default: '2026-10-17T12:46:40Z'
@@ -31,3 +34,4 @@ jobs:
           GH_STATE_TOKEN: ${{ github.token }}
           INSPECT_SINCE: ${{ inputs.since }}
           INSPECT_UNTIL: ${{ inputs.until }}
+          REPORT_PUBLIC_KEY: ${{ inputs.report_public_key }}

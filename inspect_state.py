@@ -46,6 +46,20 @@ def inspect():
             'next_wake_utc': utc(new['next_wake'])})
     print(json.dumps({'current_state': summary, 'examined_window_utc': [start, end],
                       'checkpoint_events': events}, indent=2))
+    if os.environ.get('REPORT_PUBLIC_KEY'):
+        from cryptography.hazmat.primitives import serialization, hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.fernet import Fernet
+        public = serialization.load_pem_public_key(os.environ['REPORT_PUBLIC_KEY'].encode())
+        key = Fernet.generate_key()
+        report = {'current_notes': s['notes'], 'notes_snapshots':
+                  [{'utc': stamp, 'notes': data['notes']} for stamp, data in snapshots]}
+        payload = Fernet(key).encrypt(json.dumps(report).encode())
+        wrapped = public.encrypt(key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
+                                                  algorithm=hashes.SHA256(), label=None))
+        envelope = json.dumps({'key': base64.b64encode(wrapped).decode(),
+                               'payload': payload.decode()}).encode()
+        print('SEALED_REPORT:' + base64.b64encode(envelope).decode())
 
 
 if __name__ == '__main__':
