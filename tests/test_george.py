@@ -15,6 +15,25 @@ class Memory:
 
 
 class GeorgeTests(unittest.TestCase):
+    def test_reflection_can_continue_but_stops_at_seven_calls(self):
+        s = Memory()
+        decision = {'action': 'think', 'notes': 'A question of my own.',
+                    'decision_summary': 'Consider an unresolved question.', 'next_wake_hours': 3}
+        with patch.object(g, 'think', return_value=decision) as think, patch.object(g, 'send'), patch.object(g, 'read_web') as read:
+            g.awaken(s, True)
+        self.assertEqual(think.call_count, 7)
+        read.assert_not_called()
+        self.assertEqual(len(s.saved[-1]['last_session']['steps']), 7)
+        self.assertEqual(s.data['notes'], 'A question of my own.')
+
+    def test_rest_remains_valid_after_one_call(self):
+        s = Memory()
+        with patch.object(g, 'think', return_value={'action': 'rest', 'notes': 'No current question.',
+                'decision_summary': 'Nothing I want to pursue now.', 'next_wake_hours': 5}) as think:
+            g.awaken(s, True)
+        self.assertEqual(think.call_count, 1)
+        self.assertEqual(s.data['last_session']['steps'][0]['action'], 'rest')
+
     def test_cap_exact_and_never_exceeded(self):
         s = Memory()
         for _ in range(100):

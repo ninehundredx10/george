@@ -3,6 +3,12 @@
 A small, curious explorer. No assigned topic, productivity target, mandatory report, shell,
 code execution, publishing tool, or ability to change his own permissions or budget.
 
+Awakenings can follow a self-selected question, public web reading, or another reflection step.
+George can also rest; no activity quota or report is required. His instructions distinguish
+useful continuity notes from repetitive identity summaries and do not suggest a sleep duration.
+The latest session's actions, brief decision summaries, and web outcomes are encrypted in state
+for private inspection. These are observable decisions, not a transcript of hidden reasoning.
+
 ## First launch
 
 Repository Actions secrets: `OPENAI_API_KEY` and `TELEGRAM_BOT_TOKEN` (already configured).

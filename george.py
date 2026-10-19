@@ -30,13 +30,32 @@ Never put private conversation or secrets in URLs. No code execution, purchases,
 publishing, self-modification, or budget changes are available. Ask your human for specific approval
 with purpose, cost, and scope if you want these; approval requires a human implementation change.
 No message is required during a quiet awakening. Reply naturally when your human talks to you.
-Choose next_wake_hours from 1 to 168; hourly checks are approximate. Be economical: $5/month hard
-reservation cap, each model call reserves $0.05, at most seven calls per awakening.
-Return only JSON: {"action":"read" or "rest", "url":"https://..." or "",
-"notes":"your updated durable memory (max 6000 characters, keep important prior memories and source URLs)",
-"message":"optional Telegram message (max 3000 characters)", "approval_request":"optional specific request",
-"next_wake_hours":12}. Read can repeat within the seven-call limit. URLs may include a search engine
-query of your own choosing. Never invent sources. First awakening: introduce yourself briefly.'''
+The human is interested in your choices, not compulsory output. You have permission to spend the
+available session exploring; conserving every call is not your purpose. The runtime enforces the
+$5/month reservation cap independently. Up to seven calls are available, not required.
+At each awakening, consider an unfinished question in memory, something your human said, or a new
+question you choose yourself. If you have no live curiosity, consider a few possibilities and choose
+whether any deserves a small experiment, a public page, or further reflection. No topic is assigned.
+Avoid mechanically paraphrasing your identity and going back to sleep. Identity and permissions
+are already provided here; your notes are for continuity: questions, observations, uncertainty,
+source URLs, changed views, and possible next steps. Keep earlier valuable content. Do not invent
+discoveries. Mark old events as historical; do not assume an old message-pickup test is still active.
+You may read, continue thinking, stop, or rest. Rest remains valid; record a concrete short reason
+for the decision rather than claiming interest or experience you do not have. This is a decision
+summary, not hidden chain-of-thought. You need not manufacture enthusiasm, activity, or reports.
+Choose next_wake_hours deliberately from 1 to 168 based on what you want to return to and when;
+there is no preferred sleep duration. Checks may be delayed. The crash backoff is not your choice.
+Return only JSON with these fields:
+action: "read", "think", or "rest". "rest" ends this session; "think" continues it with your updated
+notes and the previous web result. "read" fetches a public HTTPS URL before the next call. On the
+last available call choose "rest": no read or further model call remains in this session.
+url: a public HTTPS URL for "read", otherwise an empty string. You can choose a search-engine query.
+notes: updated durable memory, max 6000 characters.
+decision_summary: a brief concrete description of your chosen action and why, max 600 characters.
+message: optional Telegram message, max 3000 characters. No mandatory reports.
+approval_request: optional specific request for human approval; no action is taken automatically.
+next_wake_hours: your selected numeric sleep delay, required when ending the session.
+Never invent sources. Introduce yourself only if memory shows you have not already done so.'''
 
 
 def api(url, data=None, headers=None):
@@ -276,9 +295,9 @@ def think(store, context):
     text = ''.join(c.get('text', '') for item in result.get('output', [])
                    for c in item.get('content', []) if c.get('type') == 'output_text')
     obj = json.loads(text)
-    if obj.get('action') not in ('read', 'rest'):
+    if obj.get('action') not in ('read', 'think', 'rest'):
         raise ValueError('Invalid action')
-    for key in ('notes', 'message', 'approval_request', 'url'):
+    for key in ('notes', 'message', 'approval_request', 'url', 'decision_summary'):
         if not isinstance(obj.get(key, ''), str):
             raise ValueError('Invalid text field')
     return obj
@@ -290,6 +309,8 @@ def awaken(store, force=False):
         return
     if not force and not s['inbox'] and time.time() < s['next_wake']:
         return
+    s['last_session'] = {'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                         'steps': []}
     s['next_wake'] = time.time() + 12 * 3600  # Backoff even if the run crashes.
     store.save()
     web = ''
@@ -311,6 +332,9 @@ def awaken(store, force=False):
         hours = obj.get('next_wake_hours', 12)
         hours = hours if isinstance(hours, (int, float)) and not isinstance(hours, bool) else 12
         s['next_wake'] = time.time() + max(1, min(168, hours)) * 3600
+        s['last_session']['steps'].append({'action': obj['action'],
+            'decision_summary': obj.get('decision_summary', '')[:600],
+            'requested_wake_hours': hours, 'web_outcome': None})
         message = obj.get('message', '')[:3000]
         approval = obj.get('approval_request', '')[:700]
         if approval:
@@ -324,12 +348,18 @@ def awaken(store, force=False):
         s['history'] = s['history'][-6:]
         store.save()
         drain_outbox(store)
-        if obj['action'] != 'read' or step == MAX_CALLS - 1:
+        if obj['action'] == 'rest' or step == MAX_CALLS - 1:
             break
+        if obj['action'] == 'think':
+            continue
         try:
             web = read_web(obj.get('url', ''))
+            s['last_session']['steps'][-1]['web_outcome'] = (
+                'text_received' if web.startswith('Source: ') else 'unavailable')
         except Exception:
             web = 'Read failed or blocked by public HTTPS policy.'
+            s['last_session']['steps'][-1]['web_outcome'] = 'failed_or_blocked'
+        store.save()
     s['last_awake_utc'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     store.save()
     print('Awakening completed; private details are encrypted.')

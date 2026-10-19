@@ -52,7 +52,7 @@ def inspect():
         from cryptography.fernet import Fernet
         public = serialization.load_pem_public_key(os.environ['REPORT_PUBLIC_KEY'].encode())
         key = Fernet.generate_key()
-        report = {'current_notes': s['notes'], 'notes_snapshots':
+        report = {'current_notes': s['notes'], 'last_session': s.get('last_session'), 'notes_snapshots':
                   [{'utc': stamp, 'notes': data['notes']} for stamp, data in snapshots]}
         payload = Fernet(key).encrypt(json.dumps(report).encode())
         wrapped = public.encrypt(key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
