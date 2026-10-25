@@ -15,6 +15,61 @@ class Memory:
 
 
 class GeorgeTests(unittest.TestCase):
+    def test_stale_session_limit_cannot_end_fresh_session(self):
+        s = Memory()
+        s.data['notes'] = 'Since this is the last available call, I am ending the session.'
+        stale = {'action': 'rest', 'stop_reason': 'session_limit', 'notes': 'WRONG: overwrite',
+                 'decision_summary': 'Last available call.', 'next_wake_hours': 24}
+        chosen = {'action': 'rest', 'stop_reason': 'chosen_rest', 'notes': 'A deliberate choice.',
+                  'decision_summary': 'I choose to rest despite available calls.', 'next_wake_hours': 4}
+        contexts = []
+        def model(store, context):
+            contexts.append(copy.deepcopy(context))
+            return stale if len(contexts) == 1 else chosen
+        with patch.object(g, 'think', side_effect=model):
+            g.awaken(s, True)
+        self.assertEqual(len(contexts), 2)
+        self.assertEqual(contexts[0]['runtime']['calls_available_after_this_response'], 6)
+        self.assertFalse(contexts[0]['runtime']['is_last_available_call'])
+        self.assertIn('NOT reached', contexts[1]['runtime']['correction'])
+        self.assertNotEqual(contexts[1]['memory'], 'WRONG: overwrite')
+        self.assertFalse(s.data['last_session']['steps'][0]['accepted'])
+        self.assertEqual(s.data['last_session']['end_reason'], 'chosen_rest')
+
+    def test_previous_sessions_archived_and_live_counter_resets(self):
+        s = Memory()
+        choice = {'action': 'rest', 'stop_reason': 'chosen_rest', 'next_wake_hours': 4}
+        with patch.object(g, 'think', return_value=choice) as model:
+            g.awaken(s, True)
+            old_id = s.data['last_session']['id']
+            g.awaken(s, True)
+        context = model.call_args[0][1]
+        self.assertTrue(context['runtime']['new_session'])
+        self.assertEqual(context['runtime']['calls_available_after_this_response'], 6)
+        self.assertNotEqual(old_id, context['runtime']['session_id'])
+        self.assertEqual(s.data['session_archive'][-1]['id'], old_id)
+
+    def test_affordability_limits_live_allowance(self):
+        s = Memory()
+        s.data['ledger'][g.month()] = 495
+        with patch.object(g, 'think', return_value={'action': 'rest', 'stop_reason': 'session_limit',
+                'next_wake_hours': 1}) as model:
+            g.awaken(s, True)
+        self.assertTrue(model.call_args[0][1]['runtime']['is_last_available_call'])
+        self.assertEqual(s.data['last_session']['end_reason'], 'session_limit')
+
+    def test_live_facts_are_in_instructions_and_strict_schema_requested(self):
+        s = Memory()
+        choice = {'action': 'rest', 'stop_reason': 'chosen_rest', 'url': '', 'notes': 'A question.',
+                  'decision_summary': 'Rest by choice.', 'message': '', 'approval_request': '', 'next_wake_hours': 2}
+        response = {'status': 'completed', 'output': [{'content': [{'type': 'output_text',
+                    'text': g.json.dumps(choice)}]}]}
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'fake'}), patch.object(g, 'api', return_value=response) as api:
+            g.think(s, {'memory': 'last available call', 'runtime': {'is_last_available_call': False}})
+        request = api.call_args[0][1]
+        self.assertIn('"is_last_available_call": false', request['instructions'])
+        self.assertTrue(request['text']['format']['strict'])
+
     def test_reflection_can_continue_but_stops_at_seven_calls(self):
         s = Memory()
         decision = {'action': 'think', 'notes': 'A question of my own.',

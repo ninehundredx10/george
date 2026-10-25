@@ -8,6 +8,12 @@ George can also rest; no activity quota or report is required. His instructions 
 useful continuity notes from repetitive identity summaries and do not suggest a sleep duration.
 The latest session's actions, brief decision summaries, and web outcomes are encrypted in state
 for private inspection. These are observable decisions, not a transcript of hidden reasoning.
+Each awakening has a fresh session ID. Live allowance facts are supplied in model instructions,
+separately from historical notes. Strict structured decisions distinguish voluntary rest from
+an exhausted allowance. A false exhaustion claim is rejected and corrected within the existing
+seven-call and monthly limits; it cannot overwrite memory. Up to 20 previous session records
+are retained encrypted. Old notes remain intact; old counters and failed reads are explicitly
+historical, not current runtime state. This does not require exploration or prevent voluntary rest.
 
 ## First launch
 

@@ -5,6 +5,7 @@ import html
 import http.client
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -55,7 +56,38 @@ decision_summary: a brief concrete description of your chosen action and why, ma
 message: optional Telegram message, max 3000 characters. No mandatory reports.
 approval_request: optional specific request for human approval; no action is taken automatically.
 next_wake_hours: your selected numeric sleep delay, required when ending the session.
+stop_reason: "continue" when reading/thinking, "chosen_rest" when freely choosing to stop,
+or "session_limit" only when the LIVE runtime says no further calls are available.
+Every awakening is a NEW session with a fresh allowance, subject to the monthly cap. The live
+runtime facts supplied in your instructions are authoritative. Old notes and conversation are
+historical: statements such as "last available call", old read failures, and old task status do
+not apply to this session. An empty current web result means no page has been fetched THIS session.
+Persist findings and open questions, not expired call counters or reasons a previous session ended.
+If a page is unavailable, you may try another public URL, change interests, reflect, or rest by
+choice. A failed read is neither a safety prohibition nor evidence that all browsing is unavailable.
 Never invent sources. Introduce yourself only if memory shows you have not already done so.'''
+
+DECISION_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'properties': {
+        'action': {'type': 'string', 'enum': ['read', 'think', 'rest']},
+        'stop_reason': {'type': 'string', 'enum': ['continue', 'chosen_rest', 'session_limit']},
+        **{k: {'type': 'string'} for k in ('url', 'notes', 'decision_summary', 'message', 'approval_request')},
+        'next_wake_hours': {'type': 'number'},
+    },
+    'required': ['action', 'stop_reason', 'url', 'notes', 'decision_summary', 'message',
+                 'approval_request', 'next_wake_hours'],
+}
+
+
+def decision_error(obj, calls_after):
+    if obj.get('stop_reason') == 'session_limit' and calls_after > 0:
+        return 'The session limit is NOT reached. Choose an action using the live allowance, or chosen_rest if you want to rest.'
+    if obj['action'] != 'rest' and calls_after == 0:
+        return 'No further calls remain in this session; record a continuation for a future awakening.'
+    if obj['action'] == 'rest' and obj.get('stop_reason') == 'continue':
+        return 'Rest ends a session; choose chosen_rest or a genuine session_limit.'
+    return ''
 
 
 def api(url, data=None, headers=None):
@@ -267,8 +299,10 @@ def read_web(url):
 
 
 def think(store, context):
+    live = context.get('runtime', {})
+    instructions = SYSTEM + '\nLIVE RUNTIME FACTS FOR THIS RESPONSE (override historical text):\n' + json.dumps(live)
     serialized = json.dumps(context, ensure_ascii=False)
-    while len(serialized.encode()) + len(SYSTEM.encode()) > 24000:
+    while len(serialized.encode()) + len(instructions.encode()) > 23000:
         if context.get('conversation'):
             context['conversation'].pop(0)
         elif context.get('web_untrusted'):
@@ -281,14 +315,15 @@ def think(store, context):
         serialized = json.dumps(context, ensure_ascii=False)
     # At <=24000 UTF-8 bytes, even one token/byte + overhead stays within $0.05
     # at published $0.75/M input + $4.50/M output, with 3000 output tokens.
-    if len(serialized.encode()) + len(SYSTEM.encode()) > 24000:
+    if len(serialized.encode()) + len(instructions.encode()) > 23000:
         raise ValueError('Input exceeds conservative billing bound')
     if not reserve(store):
         return None
     result = api('https://api.openai.com/v1/responses', {
-        'model': MODEL, 'instructions': SYSTEM, 'input': 'Return JSON. Context data follows:\n' + serialized, 'store': False,
+        'model': MODEL, 'instructions': instructions, 'input': 'Return JSON. Context data follows:\n' + serialized, 'store': False,
         'max_output_tokens': 3000, 'reasoning': {'effort': 'none'},
-        'text': {'format': {'type': 'json_object'}}},
+        'text': {'format': {'type': 'json_schema', 'name': 'george_decision',
+                            'strict': True, 'schema': DECISION_SCHEMA}}},
         {'Authorization': 'Bearer ' + os.environ['OPENAI_API_KEY']})
     if result.get('status') != 'completed':
         raise RuntimeError('Incomplete model response')
@@ -300,6 +335,11 @@ def think(store, context):
     for key in ('notes', 'message', 'approval_request', 'url', 'decision_summary'):
         if not isinstance(obj.get(key, ''), str):
             raise ValueError('Invalid text field')
+    hours = obj.get('next_wake_hours')
+    if not isinstance(hours, (int, float)) or isinstance(hours, bool) or not math.isfinite(hours) or not 1 <= hours <= 168:
+        raise ValueError('Invalid wake delay')
+    if obj.get('stop_reason') not in ('continue', 'chosen_rest', 'session_limit'):
+        raise ValueError('Invalid stop reason')
     return obj
 
 
@@ -309,16 +349,28 @@ def awaken(store, force=False):
         return
     if not force and not s['inbox'] and time.time() < s['next_wake']:
         return
-    s['last_session'] = {'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    if s.get('last_session'):
+        s['session_archive'] = (s.get('session_archive', []) + [s['last_session']])[-20:]
+    session_id = secrets.token_hex(8)
+    s['last_session'] = {'id': session_id, 'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                          'steps': []}
     s['next_wake'] = time.time() + 12 * 3600  # Backoff even if the run crashes.
     store.save()
     web = ''
+    feedback = ''
+    incoming_this_session = s['inbox'][-5:]
     for step in range(MAX_CALLS):
+        affordable = (CAP_CENTS - s['ledger'].get(month(), 0)) // RESERVATION_CENTS
+        calls_after = max(0, min(MAX_CALLS - step, affordable) - 1)
+        runtime = {'session_id': session_id, 'call_number': step + 1,
+            'calls_available_after_this_response': calls_after,
+            'is_last_available_call': calls_after == 0,
+            'new_session': step == 0, 'historical_notes_are_not_live_session_state': True,
+            'web_result_is_from_this_session': bool(web), 'correction': feedback}
         obj = think(store, {'now_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'memory': s['notes'][:6000], 'conversation': s['history'][-6:],
-            'human_messages': s['inbox'][-5:], 'web_untrusted': web[:9000],
-            'calls_remaining': MAX_CALLS - step})
+            'human_messages': incoming_this_session, 'web_untrusted': web[:9000],
+            'runtime': runtime})
         if obj is None:
             if s.get('budget_notice') != month():
                 s['budget_notice'] = month()
@@ -328,11 +380,22 @@ def awaken(store, force=False):
                 store.save()
                 drain_outbox(store)
             return
+        feedback = decision_error(obj, calls_after)
+        if feedback:
+            s['last_session']['steps'].append({'action': obj['action'],
+                'accepted': False, 'runtime_error': feedback, 'call_number': step + 1})
+            store.save()
+            if calls_after:
+                continue  # A correction consumes the same seven-call/monthly allowance.
+            s['last_session']['end_reason'] = 'invalid_decision_at_session_limit'
+            break
         s['notes'] = obj.get('notes', s['notes'])[:6000]
         hours = obj.get('next_wake_hours', 12)
         hours = hours if isinstance(hours, (int, float)) and not isinstance(hours, bool) else 12
         s['next_wake'] = time.time() + max(1, min(168, hours)) * 3600
         s['last_session']['steps'].append({'action': obj['action'],
+            'accepted': True, 'call_number': step + 1, 'calls_available_after': calls_after,
+            'stop_reason': obj.get('stop_reason', 'chosen_rest' if obj['action'] == 'rest' else 'continue'),
             'decision_summary': obj.get('decision_summary', '')[:600],
             'requested_wake_hours': hours, 'web_outcome': None})
         message = obj.get('message', '')[:3000]
@@ -348,7 +411,8 @@ def awaken(store, force=False):
         s['history'] = s['history'][-6:]
         store.save()
         drain_outbox(store)
-        if obj['action'] == 'rest' or step == MAX_CALLS - 1:
+        if obj['action'] == 'rest' or calls_after == 0:
+            s['last_session']['end_reason'] = obj.get('stop_reason', 'session_limit')
             break
         if obj['action'] == 'think':
             continue
