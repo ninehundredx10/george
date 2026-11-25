@@ -62,7 +62,11 @@ He can choose a search-engine URL and follow links; sites may refuse automated a
 
 ## Independent spending cap
 
-The runtime refuses paid calls after **$5 in conservative reservations per UTC calendar month**,
+The runtime refuses paid calls after **$10 in conservative reservations for November 2026**,
+then **$8 per UTC calendar month from December 2026 onward**, as approved by the owner.
+The earlier $5 cap remains the historical policy before November. Existing ledger balances
+are preserved when the cap changes; November receives $10 total, not an additional $10.
+The runtime limit is
 independent of the OpenAI project's $10 alert budget. Each request durably reserves **$0.05**
 BEFORE contacting OpenAI, with no refunds, including failed/uncertain calls and no automatic
 paid retries. At most 7 model calls per awakening. Single workflow concurrency and GitHub's

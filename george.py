@@ -18,7 +18,8 @@ import urllib.request
 from cryptography.fernet import Fernet
 
 MODEL = 'gpt-5.4-mini-2026-03-17'
-CAP_CENTS = 500
+DEFAULT_CAP_CENTS = 800
+MONTH_CAP_OVERRIDES = {'2026-11': 1000}
 RESERVATION_CENTS = 5
 MAX_CALLS = 7
 SYSTEM = '''You are George, a curious autonomous exploratory AI, with continuity through your notes.
@@ -33,7 +34,8 @@ with purpose, cost, and scope if you want these; approval requires a human imple
 No message is required during a quiet awakening. Reply naturally when your human talks to you.
 The human is interested in your choices, not compulsory output. You have permission to spend the
 available session exploring; conserving every call is not your purpose. The runtime enforces the
-$5/month reservation cap independently. Up to seven calls are available, not required.
+monthly reservation cap independently (the current cap is in the live runtime facts).
+Up to seven calls are available, not required.
 At each awakening, consider an unfinished question in memory, something your human said, or a new
 question you choose yourself. If you have no live curiosity, consider a few possibilities and choose
 whether any deserves a small experiment, a public page, or further reflection. No topic is assigned.
@@ -189,7 +191,8 @@ def poll(store):
                 s['next_wake'] = 0
             elif text == '/status':
                 send(cid, 'I am ' + ('paused.' if s['paused'] else 'running.') +
-                     ' Monthly reserved spend: $%.2f of $5.00.' % (s['ledger'].get(month(), 0) / 100) +
+                     ' Monthly reserved spend: $%.2f of $%.2f.' %
+                     (s['ledger'].get(month(), 0) / 100, cap_cents() / 100) +
                      '\nLast completed awakening: ' + s.get('last_awake_utc', 'not recorded') +
                      '\nNext chosen wake (UTC): ' + time.strftime('%Y-%m-%d %H:%M', time.gmtime(s['next_wake'])))
             elif text:
@@ -236,12 +239,19 @@ def month():
     return time.strftime('%Y-%m', time.gmtime())
 
 
+def cap_cents(month_key=None):
+    key = month_key or month()
+    if key < '2026-11':
+        return 500  # Preserve the original policy for historical accounting.
+    return MONTH_CAP_OVERRIDES.get(key, DEFAULT_CAP_CENTS)
+
+
 def reserve(store):
     ledger = store.data['ledger']
     used = ledger.get(month(), 0)
     if not isinstance(used, int) or used < 0:
         raise RuntimeError('Invalid spending ledger')
-    if used + RESERVATION_CENTS > CAP_CENTS:
+    if used + RESERVATION_CENTS > cap_cents():
         return False
     ledger[month()] = used + RESERVATION_CENTS
     store.save()  # Durable BEFORE a paid request; failure means no request.
@@ -360,11 +370,13 @@ def awaken(store, force=False):
     feedback = ''
     incoming_this_session = s['inbox'][-5:]
     for step in range(MAX_CALLS):
-        affordable = (CAP_CENTS - s['ledger'].get(month(), 0)) // RESERVATION_CENTS
+        affordable = (cap_cents() - s['ledger'].get(month(), 0)) // RESERVATION_CENTS
         calls_after = max(0, min(MAX_CALLS - step, affordable) - 1)
         runtime = {'session_id': session_id, 'call_number': step + 1,
             'calls_available_after_this_response': calls_after,
             'is_last_available_call': calls_after == 0,
+            'monthly_cap_cents': cap_cents(),
+            'monthly_reserved_cents': s['ledger'].get(month(), 0),
             'new_session': step == 0, 'historical_notes_are_not_live_session_state': True,
             'web_result_is_from_this_session': bool(web), 'correction': feedback}
         obj = think(store, {'now_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -372,9 +384,10 @@ def awaken(store, force=False):
             'human_messages': incoming_this_session, 'web_untrusted': web[:9000],
             'runtime': runtime})
         if obj is None:
-            if s.get('budget_notice') != month():
-                s['budget_notice'] = month()
-                s.setdefault('outbox', []).append('I reached my independent $5 monthly reservation cap and stopped API calls. '
+            notice_key = month() + ':' + str(cap_cents())
+            if s.get('budget_notice') != notice_key:
+                s['budget_notice'] = notice_key
+                s.setdefault('outbox', []).append('I reached my independent $%.2f monthly reservation cap and stopped API calls. ' % (cap_cents() / 100) +
                      'May I have a larger budget? It requires your approval and a reviewed configuration change. '
                      'Otherwise I resume next UTC month. /pause and /status still work.')
                 store.save()

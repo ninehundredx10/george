@@ -51,7 +51,7 @@ class GeorgeTests(unittest.TestCase):
 
     def test_affordability_limits_live_allowance(self):
         s = Memory()
-        s.data['ledger'][g.month()] = 495
+        s.data['ledger'][g.month()] = g.cap_cents() - 5
         with patch.object(g, 'think', return_value={'action': 'rest', 'stop_reason': 'session_limit',
                 'next_wake_hours': 1}) as model:
             g.awaken(s, True)
@@ -91,10 +91,10 @@ class GeorgeTests(unittest.TestCase):
 
     def test_cap_exact_and_never_exceeded(self):
         s = Memory()
-        for _ in range(100):
+        for _ in range(g.cap_cents() // g.RESERVATION_CENTS):
             self.assertTrue(g.reserve(s))
         self.assertFalse(g.reserve(s))
-        self.assertEqual(s.data['ledger'][g.month()], 500)
+        self.assertEqual(s.data['ledger'][g.month()], g.cap_cents())
 
     def test_failed_send_retains_durable_outbox(self):
         s = Memory()
@@ -194,7 +194,7 @@ class GeorgeTests(unittest.TestCase):
 
     def test_sleep_and_budget_notice_no_paid_requests(self):
         s = Memory()
-        s.data['ledger'][g.month()] = 500
+        s.data['ledger'][g.month()] = g.cap_cents()
         with patch.object(g, 'send') as send, patch.object(g, 'api') as api:
             g.awaken(s, True)
             g.awaken(s, True)
@@ -207,7 +207,33 @@ class GeorgeTests(unittest.TestCase):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'fake'}), patch.object(g, 'api', return_value=bad):
             with self.assertRaises(ValueError):
                 g.think(s, {})
-        self.assertEqual(g.CAP_CENTS, 500)
+        self.assertEqual(g.cap_cents('2026-11'), 1000)
+        self.assertEqual(g.DEFAULT_CAP_CENTS, 800)
+
+    def test_november_increase_preserves_spend_and_december_cap(self):
+        s = Memory()
+        s.data['ledger']['2026-11'] = 500
+        with patch.object(g, 'month', return_value='2026-11'):
+            self.assertTrue(g.reserve(s))
+        self.assertEqual(s.data['ledger']['2026-11'], 505)
+        s.data['ledger']['2026-11'] = 1000
+        with patch.object(g, 'month', return_value='2026-11'):
+            self.assertFalse(g.reserve(s))
+        with patch.object(g, 'month', return_value='2026-12'):
+            self.assertEqual(g.cap_cents(), 800)
+            self.assertTrue(g.reserve(s))
+        self.assertEqual(s.data['ledger']['2026-11'], 1000)
+        self.assertEqual(s.data['ledger']['2026-12'], 5)
+        self.assertEqual(g.cap_cents('2027-01'), 800)
+
+    def test_higher_cap_gets_new_exhaustion_notice(self):
+        s = Memory()
+        s.data['budget_notice'] = '2026-11:500'
+        s.data['ledger']['2026-11'] = 1000
+        with patch.object(g, 'month', return_value='2026-11'), patch.object(g, 'send') as send:
+            g.awaken(s, True)
+        self.assertIn('$10.00', send.call_args[0][1])
+        self.assertEqual(s.data['budget_notice'], '2026-11:1000')
 
 
 if __name__ == '__main__':
